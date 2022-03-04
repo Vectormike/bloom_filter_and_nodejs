@@ -33,53 +33,65 @@ String.prototype.hashCode = function () {
 app.post('/create', async (req, res) => {
   const { name, email } = req.body;
 
-  pool.query(`CREATE TABLE IF NOT EXISTS students (
+  try {
+    await bloomFilter.connect();
+
+    pool.query(`CREATE TABLE IF NOT EXISTS students (
     id BIGSERIAL,
     name TEXT,
     email TEXT
    );
 `);
 
-  const text = `
+    const text = `
     INSERT INTO students (name, email)
     VALUES ($1, $2)
     RETURNING id
   `;
 
-  const values = [name, email];
+    const values = [name, email];
 
-  pool.query(text, values, (err, result) => {
-    if (err) throw new Error(err);
+    pool.query(text, values, async (err, result) => {
+      if (err) throw new Error('Unabe to add student record');
 
-    if (!err) {
-      const key = email.hashCode();
-      bloomFilter.set(key, 1);
-      return res.send('Student record saved');
-    }
-  });
-  console.log('\x1b[36m%s\x1b[0m', error);
-  return res.send({ message: 'Unabe to add student record' });
+      if (!err) {
+        const key = email.hashCode();
+        bloomFilter.set(key, 1);
+        return res.send({ message: 'Student record saved' });
+      }
+    });
+  } catch (error) {
+    return res.send({ error });
+  }
 });
 
 // Get student details by email
 app.get('/:email', async (req, res) => {
-  const { email } = req.params;
+  try {
+    await bloomFilter.connect();
 
-  const text = `
+    const { email } = req.params;
+
+    const text = `
     SELECT * FROM students WHERE email = $1
   `;
 
-  const value = [text, email];
+    const value = [text, email];
 
-  const key = email.hashCode();
-  bloomFilter.exists(key, (err, result) => {
-    if (err) throw new Error(err);
-    if (!result) return res.send('Student does not exist');
+    const key = email.hashCode();
+    const exists = await bloomFilter.exists(key);
+
+    if (!exists) {
+      return res.send('Student does not exist');
+    }
     pool.query(text, value, (err, response) => {
-      if (err) throw new Error(err);
+      if (err) res.send(err);
+      console.log(response);
       return res.send(response);
     });
-  });
+  } catch (error) {
+    return res.send({ error });
+  }
 });
 
 const port = process.env.PORT || 5000;
